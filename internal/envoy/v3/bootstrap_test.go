@@ -103,6 +103,28 @@ func TestBootstrap(t *testing.T) {
         }
       },
       {
+        "name": "envoy-local",
+        "type": "EDS",
+        "eds_cluster_config": {
+          "eds_config": {
+            "api_config_source": {
+              "api_type": "GRPC",
+              "transport_api_version": "V3",
+              "grpc_services": [
+                {
+                  "envoy_grpc": {
+                    "cluster_name": "contour",
+                    "authority": "contour"
+                  }
+                }
+              ]
+            },
+            "resource_api_version": "V3"
+          },
+          "service_name": "envoy-local"
+        }
+      },
+      {
         "name": "envoy-admin",
         "alt_stat_name": "testing-ns_envoy-admin_9001",
         "type": "STATIC",
@@ -160,6 +182,9 @@ func TestBootstrap(t *testing.T) {
       },
  	  "resource_api_version": "V3"
     }
+  },
+  "cluster_manager": {
+    "local_cluster_name": "envoy-local"
   },
   "default_regex_engine": {
     "name": "envoy.regex_engines.google_re2",
@@ -284,6 +309,28 @@ func TestBootstrap(t *testing.T) {
         }
       },
       {
+        "name": "envoy-local",
+        "type": "EDS",
+        "eds_cluster_config": {
+          "eds_config": {
+            "api_config_source": {
+              "api_type": "GRPC",
+              "transport_api_version": "V3",
+              "grpc_services": [
+                {
+                  "envoy_grpc": {
+                    "cluster_name": "contour",
+                    "authority": "contour"
+                  }
+                }
+              ]
+            },
+            "resource_api_version": "V3"
+          },
+          "service_name": "envoy-local"
+        }
+      },
+      {
         "name": "envoy-admin",
         "alt_stat_name": "testing-ns_envoy-admin_9001",
         "type": "STATIC",
@@ -341,6 +388,9 @@ func TestBootstrap(t *testing.T) {
       },
       "resource_api_version": "V3"
     }
+  },
+  "cluster_manager": {
+    "local_cluster_name": "envoy-local"
   },
   "default_regex_engine": {
     "name": "envoy.regex_engines.google_re2",
@@ -465,6 +515,28 @@ func TestBootstrap(t *testing.T) {
         }
       },
       {
+        "name": "envoy-local",
+        "type": "EDS",
+        "eds_cluster_config": {
+          "eds_config": {
+            "api_config_source": {
+              "api_type": "GRPC",
+              "transport_api_version": "V3",
+              "grpc_services": [
+                {
+                  "envoy_grpc": {
+                    "cluster_name": "contour",
+                    "authority": "contour"
+                  }
+                }
+              ]
+            },
+            "resource_api_version": "V3"
+          },
+          "service_name": "envoy-local"
+        }
+      },
+      {
         "name": "envoy-admin",
         "alt_stat_name": "testing-ns_envoy-admin_9001",
         "type": "STATIC",
@@ -522,6 +594,9 @@ func TestBootstrap(t *testing.T) {
       },
       "resource_api_version": "V3"
     }
+  },
+  "cluster_manager": {
+    "local_cluster_name": "envoy-local"
   },
   "default_regex_engine": {
     "name": "envoy.regex_engines.google_re2",
@@ -647,6 +722,28 @@ func TestBootstrap(t *testing.T) {
         }
       },
       {
+        "name": "envoy-local",
+        "type": "EDS",
+        "eds_cluster_config": {
+          "eds_config": {
+            "api_config_source": {
+              "api_type": "GRPC",
+              "transport_api_version": "V3",
+              "grpc_services": [
+                {
+                  "envoy_grpc": {
+                    "cluster_name": "contour",
+                    "authority": "contour"
+                  }
+                }
+              ]
+            },
+            "resource_api_version": "V3"
+          },
+          "service_name": "envoy-local"
+        }
+      },
+      {
         "name": "envoy-admin",
         "alt_stat_name": "testing-ns_envoy-admin_9001",
         "type": "STATIC",
@@ -704,6 +801,9 @@ func TestBootstrap(t *testing.T) {
       },
 	  "resource_api_version": "V3"
     }
+  },
+  "cluster_manager": {
+    "local_cluster_name": "envoy-local"
   },
   "default_regex_engine": {
     "name": "envoy.regex_engines.google_re2",
@@ -829,6 +929,28 @@ func TestBootstrap(t *testing.T) {
         }
       },
       {
+        "name": "envoy-local",
+        "type": "EDS",
+        "eds_cluster_config": {
+          "eds_config": {
+            "api_config_source": {
+              "api_type": "GRPC",
+              "transport_api_version": "V3",
+              "grpc_services": [
+                {
+                  "envoy_grpc": {
+                    "cluster_name": "contour",
+                    "authority": "contour"
+                  }
+                }
+              ]
+            },
+            "resource_api_version": "V3"
+          },
+          "service_name": "envoy-local"
+        }
+      },
+      {
         "name": "envoy-admin",
         "alt_stat_name": "testing-ns_envoy-admin_9001",
         "type": "STATIC",
@@ -886,6 +1008,9 @@ func TestBootstrap(t *testing.T) {
       },
 	  "resource_api_version": "V3"
     }
+  },
+  "cluster_manager": {
+    "local_cluster_name": "envoy-local"
   },
   "default_regex_engine": {
     "name": "envoy.regex_engines.google_re2",
@@ -1011,6 +1136,28 @@ func TestBootstrap(t *testing.T) {
         }
       },
       {
+        "name": "envoy-local",
+        "type": "EDS",
+        "eds_cluster_config": {
+          "eds_config": {
+            "api_config_source": {
+              "api_type": "GRPC",
+              "transport_api_version": "V3",
+              "grpc_services": [
+                {
+                  "envoy_grpc": {
+                    "cluster_name": "contour",
+                    "authority": "contour"
+                  }
+                }
+              ]
+            },
+            "resource_api_version": "V3"
+          },
+          "service_name": "envoy-local"
+        }
+      },
+      {
         "name": "envoy-admin",
         "alt_stat_name": "testing-ns_envoy-admin_9001",
         "type": "STATIC",
@@ -1068,6 +1215,9 @@ func TestBootstrap(t *testing.T) {
       },
 	  "resource_api_version": "V3"
     }
+  },
+  "cluster_manager": {
+    "local_cluster_name": "envoy-local"
   },
   "default_regex_engine": {
     "name": "envoy.regex_engines.google_re2",
@@ -1195,6 +1345,28 @@ func TestBootstrap(t *testing.T) {
         }
       },
       {
+        "name": "envoy-local",
+        "type": "EDS",
+        "eds_cluster_config": {
+          "eds_config": {
+            "api_config_source": {
+              "api_type": "GRPC",
+              "transport_api_version": "V3",
+              "grpc_services": [
+                {
+                  "envoy_grpc": {
+                    "cluster_name": "contour",
+                    "authority": "contour"
+                  }
+                }
+              ]
+            },
+            "resource_api_version": "V3"
+          },
+          "service_name": "envoy-local"
+        }
+      },
+      {
         "name": "envoy-admin",
         "alt_stat_name": "testing-ns_envoy-admin_9001",
         "type": "STATIC",
@@ -1252,6 +1424,9 @@ func TestBootstrap(t *testing.T) {
       },
 	  "resource_api_version": "V3"
     }
+  },
+  "cluster_manager": {
+    "local_cluster_name": "envoy-local"
   },
   "default_regex_engine": {
     "name": "envoy.regex_engines.google_re2",
@@ -1413,6 +1588,28 @@ func TestBootstrap(t *testing.T) {
         }
       },
       {
+        "name": "envoy-local",
+        "type": "EDS",
+        "eds_cluster_config": {
+          "eds_config": {
+            "api_config_source": {
+              "api_type": "GRPC",
+              "transport_api_version": "V3",
+              "grpc_services": [
+                {
+                  "envoy_grpc": {
+                    "cluster_name": "contour",
+                    "authority": "contour"
+                  }
+                }
+              ]
+            },
+            "resource_api_version": "V3"
+          },
+          "service_name": "envoy-local"
+        }
+      },
+      {
         "name": "envoy-admin",
         "alt_stat_name": "testing-ns_envoy-admin_9001",
         "type": "STATIC",
@@ -1470,6 +1667,9 @@ func TestBootstrap(t *testing.T) {
       },
 	  "resource_api_version": "V3"
     }
+  },
+  "cluster_manager": {
+    "local_cluster_name": "envoy-local"
   },
   "default_regex_engine": {
     "name": "envoy.regex_engines.google_re2",
@@ -1641,6 +1841,28 @@ func TestBootstrap(t *testing.T) {
               }
             },
             {
+              "name": "envoy-local",
+              "type": "EDS",
+              "eds_cluster_config": {
+                "eds_config": {
+                  "api_config_source": {
+                    "api_type": "GRPC",
+                    "transport_api_version": "V3",
+                    "grpc_services": [
+                      {
+                        "envoy_grpc": {
+                          "cluster_name": "contour",
+                          "authority": "contour"
+                        }
+                      }
+                    ]
+                  },
+                  "resource_api_version": "V3"
+                },
+                "service_name": "envoy-local"
+              }
+            },
+            {
               "name": "envoy-admin",
               "alt_stat_name": "testing-ns_envoy-admin_9001",
               "type": "STATIC",
@@ -1698,6 +1920,9 @@ func TestBootstrap(t *testing.T) {
             },
             "resource_api_version": "V3"
           }
+        },
+        "cluster_manager": {
+          "local_cluster_name": "envoy-local"
         },
         "default_regex_engine": {
           "name": "envoy.regex_engines.google_re2",
@@ -1869,6 +2094,28 @@ func TestBootstrap(t *testing.T) {
               }
             },
             {
+              "name": "envoy-local",
+              "type": "EDS",
+              "eds_cluster_config": {
+                "eds_config": {
+                  "api_config_source": {
+                    "api_type": "GRPC",
+                    "transport_api_version": "V3",
+                    "grpc_services": [
+                      {
+                        "envoy_grpc": {
+                          "cluster_name": "contour",
+                          "authority": "contour"
+                        }
+                      }
+                    ]
+                  },
+                  "resource_api_version": "V3"
+                },
+                "service_name": "envoy-local"
+              }
+            },
+            {
               "name": "envoy-admin",
               "alt_stat_name": "projectcontour_envoy-admin_9001",
               "type": "STATIC",
@@ -1894,6 +2141,9 @@ func TestBootstrap(t *testing.T) {
               }
             }
           ]
+        },
+        "cluster_manager": {
+          "local_cluster_name": "envoy-local"
         },
         "default_regex_engine": {
           "name": "envoy.regex_engines.google_re2",
@@ -2086,6 +2336,28 @@ func TestBootstrap(t *testing.T) {
                 }
               },
               {
+                "name": "envoy-local",
+                "type": "EDS",
+                "eds_cluster_config": {
+                  "eds_config": {
+                    "api_config_source": {
+                      "api_type": "GRPC",
+                      "transport_api_version": "V3",
+                      "grpc_services": [
+                        {
+                          "envoy_grpc": {
+                            "cluster_name": "contour",
+                            "authority": "contour"
+                          }
+                        }
+                      ]
+                    },
+                    "resource_api_version": "V3"
+                  },
+                  "service_name": "envoy-local"
+                }
+              },
+              {
                 "name": "envoy-admin",
                 "alt_stat_name": "projectcontour_envoy-admin_9001",
                 "type": "STATIC",
@@ -2111,6 +2383,9 @@ func TestBootstrap(t *testing.T) {
                 }
               }
             ]
+          },
+          "cluster_manager": {
+            "local_cluster_name": "envoy-local"
           },
           "default_regex_engine": {
             "name": "envoy.regex_engines.google_re2",
@@ -2280,6 +2555,28 @@ func TestBootstrap(t *testing.T) {
                   }
                 },
                 {
+                  "name": "envoy-local",
+                  "type": "EDS",
+                  "eds_cluster_config": {
+                    "eds_config": {
+                      "api_config_source": {
+                        "api_type": "GRPC",
+                        "transport_api_version": "V3",
+                        "grpc_services": [
+                          {
+                            "envoy_grpc": {
+                              "cluster_name": "contour",
+                              "authority": "contour"
+                            }
+                          }
+                        ]
+                      },
+                      "resource_api_version": "V3"
+                    },
+                    "service_name": "envoy-local"
+                  }
+                },
+                {
                   "name": "envoy-admin",
                   "alt_stat_name": "projectcontour_envoy-admin_9001",
                   "type": "STATIC",
@@ -2305,6 +2602,9 @@ func TestBootstrap(t *testing.T) {
                   }
                 }
               ]
+            },
+            "cluster_manager": {
+              "local_cluster_name": "envoy-local"
             },
             "default_regex_engine": {
               "name": "envoy.regex_engines.google_re2",

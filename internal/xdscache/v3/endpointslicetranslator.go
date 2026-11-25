@@ -16,6 +16,7 @@ package v3
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"sync"
 
@@ -28,9 +29,11 @@ import (
 	discovery_v1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/utils/ptr"
 
 	"github.com/projectcontour/contour/internal/contour"
 	"github.com/projectcontour/contour/internal/dag"
+	"github.com/projectcontour/contour/internal/envoy"
 	envoy_v3 "github.com/projectcontour/contour/internal/envoy/v3"
 	"github.com/projectcontour/contour/internal/k8s"
 	"github.com/projectcontour/contour/internal/protobuf"
@@ -46,7 +49,17 @@ type (
 // resources by matching the given service port to the given discovery_v1.EndpointSlice.
 // endpointSliceMap may be nil, in which case, the result is also nil.
 func (c *EndpointSliceCache) RecalculateEndpoints(port, healthPort core_v1.ServicePort, endpointSliceMap map[string]*discovery_v1.EndpointSlice) []*LoadBalancingEndpoint {
+	lb, _, _ := c.recalculateEndpoints(port, healthPort, endpointSliceMap)
+	return lb
+}
+
+// recalculateEndpoints is RecalculateEndpoints, but also returns the zone of
+// each endpoint, and whether Kubernetes enabled Topology Aware Routing by
+// adding zone hints to the endpoints.
+func (c *EndpointSliceCache) recalculateEndpoints(port, healthPort core_v1.ServicePort, endpointSliceMap map[string]*discovery_v1.EndpointSlice) ([]*LoadBalancingEndpoint, []string, bool) {
 	var lb []*LoadBalancingEndpoint
+	var zones []string
+	hinted := false
 	uniqueEndpoints := make(map[string]struct{}, 0)
 	var healthCheckPort int32
 
@@ -57,6 +70,9 @@ func (c *EndpointSliceCache) RecalculateEndpoints(port, healthPort core_v1.Servi
 
 		for _, endpoint := range endpointSlice.Endpoints {
 			healthStatus := endpointHealthStatus(endpoint.Conditions)
+			if endpoint.Hints != nil && len(endpoint.Hints.ForZones) > 0 {
+				hinted = true
+			}
 
 			// Range over each port. We want the resultant endpoints to be a
 			// a cartesian product MxN where M are the endpoints and N are the ports.
@@ -105,6 +121,7 @@ func (c *EndpointSliceCache) RecalculateEndpoints(port, healthPort core_v1.Servi
 					lbEndpoint := envoy_v3.LBEndpoint(addr)
 					lbEndpoint.HealthStatus = healthStatus
 					lb = append(lb, lbEndpoint)
+					zones = append(zones, ptr.Deref(endpoint.Zone, ""))
 					uniqueEndpoints[endpointKey] = struct{}{}
 				}
 			}
@@ -117,7 +134,42 @@ func (c *EndpointSliceCache) RecalculateEndpoints(port, healthPort core_v1.Servi
 		}
 	}
 
-	return lb
+	return lb, zones, hinted
+}
+
+// zoneEndpoints groups the endpoints by zone, so that Envoy can do zone aware
+// routing, see https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/zone_aware
+// If any endpoint has no zone, it returns all endpoints in a single group.
+func zoneEndpoints(lb []*LoadBalancingEndpoint, zones []string, weight uint32) []*LocalityEndpoints {
+	if len(lb) == 0 {
+		return nil
+	}
+
+	byZone := map[string]*LocalityEndpoints{}
+	for i, endpoint := range lb {
+		if zones[i] == "" {
+			return []*LocalityEndpoints{{
+				LbEndpoints:         lb,
+				LoadBalancingWeight: protobuf.UInt32OrNil(weight),
+			}}
+		}
+
+		locality, ok := byZone[zones[i]]
+		if !ok {
+			locality = &LocalityEndpoints{
+				Locality:            &envoy_config_core_v3.Locality{Zone: zones[i]},
+				LoadBalancingWeight: protobuf.UInt32OrNil(weight),
+			}
+			byZone[zones[i]] = locality
+		}
+		locality.LbEndpoints = append(locality.LbEndpoints, endpoint)
+	}
+
+	localities := make([]*LocalityEndpoints, 0, len(byZone))
+	for _, zone := range slices.Sorted(maps.Keys(byZone)) {
+		localities = append(localities, byZone[zone])
+	}
+	return localities
 }
 
 // endpointHealthStatus tells Envoy about endpoints that must not receive
@@ -181,7 +233,18 @@ func (c *EndpointSliceCache) Recalculate() map[string]*envoy_config_endpoint_v3.
 		// attach them as a new LocalityEndpoints resource.
 		for _, w := range cluster.Services {
 			n := types.NamespacedName{Namespace: w.ServiceNamespace, Name: w.ServiceName}
-			if lb := c.RecalculateEndpoints(w.ServicePort, w.HealthPort, c.endpointSlices[n]); lb != nil {
+			lb, zones, hinted := c.recalculateEndpoints(w.ServicePort, w.HealthPort, c.endpointSlices[n])
+
+			// Like kube-proxy, use Topology Aware Routing if Kubernetes
+			// enabled it for the Service. Clusters of multiple Services
+			// balance between Services by weight, so they do not use it.
+			// The Envoys always need their zones, see SetEnvoyService.
+			if len(cluster.Services) == 1 && (hinted || cluster.ClusterName == envoy.LocalClusterName) {
+				cla.Endpoints = zoneEndpoints(lb, zones, w.Weight)
+				continue
+			}
+
+			if lb != nil {
 				// Append the new set of endpoints. Users are allowed to set the load
 				// balancing weight to 0, which we reflect to Envoy as nil in order to
 				// assign no load to that locality.
@@ -311,6 +374,9 @@ type EndpointSliceTranslator struct {
 
 	cache EndpointSliceCache
 
+	// localCluster is the cluster of the Envoys, see SetEnvoyService.
+	localCluster *dag.ServiceCluster
+
 	mu      sync.Mutex // Protects entries.
 	entries map[string]*envoy_config_endpoint_v3.ClusterLoadAssignment
 }
@@ -325,10 +391,34 @@ func (e *EndpointSliceTranslator) Merge(entries map[string]*envoy_config_endpoin
 	maps.Copy(e.entries, entries)
 }
 
+// SetEnvoyService sets the Service of the Envoys. Their endpoints, grouped by
+// zone, are served as the ClusterLoadAssignment envoy.LocalClusterName, which
+// Envoy uses for zone aware routing. It must be called before any other method.
+func (e *EndpointSliceTranslator) SetEnvoyService(service types.NamespacedName) {
+	e.localCluster = &dag.ServiceCluster{
+		ClusterName: envoy.LocalClusterName,
+		Services: []dag.WeightedService{{
+			Weight:           1,
+			ServiceName:      service.Name,
+			ServiceNamespace: service.Namespace,
+		}},
+	}
+
+	if err := e.cache.SetClusters([]*dag.ServiceCluster{e.localCluster}); err != nil {
+		e.WithError(err).Error("failed to cache Envoy service cluster")
+	}
+	e.Merge(e.cache.Recalculate())
+}
+
 // OnChange observes DAG rebuild events.
 func (e *EndpointSliceTranslator) OnChange(root *dag.DAG) {
 	clusters := []*dag.ServiceCluster{}
 	names := map[string]bool{}
+
+	if e.localCluster != nil {
+		clusters = append(clusters, e.localCluster)
+		names[e.localCluster.ClusterName] = true
+	}
 
 	for _, svc := range root.GetServiceClusters() {
 		if err := svc.Validate(); err != nil {

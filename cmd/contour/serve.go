@@ -496,6 +496,10 @@ func (s *Server) doServe() error {
 
 	// Endpoints updates are handled directly by the EndpointSliceTranslator due to the high update volume.
 	endpointHandler := xdscache_v3.NewEndpointSliceTranslator(s.log.WithField("context", "endpointslicetranslator"))
+	endpointHandler.SetEnvoyService(types.NamespacedName{
+		Namespace: contourConfiguration.Envoy.Service.Namespace,
+		Name:      contourConfiguration.Envoy.Service.Name,
+	})
 
 	envoyGen := envoy_v3.NewEnvoyGen(envoy_v3.EnvoyGenOpt{
 		XDSClusterName: envoy_v3.DefaultXDSClusterName,

@@ -24,9 +24,11 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 	core_v1 "k8s.io/api/core/v1"
 	discovery_v1 "k8s.io/api/discovery/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
 	"github.com/projectcontour/contour/internal/dag"
+	"github.com/projectcontour/contour/internal/envoy"
 	envoy_v3 "github.com/projectcontour/contour/internal/envoy/v3"
 	"github.com/projectcontour/contour/internal/fixture"
 	"github.com/projectcontour/contour/internal/protobuf"
@@ -1325,4 +1327,147 @@ func TestEndpointHealthStatus(t *testing.T) {
 			assert.Equal(t, tc.want, endpointHealthStatus(tc.conditions))
 		})
 	}
+}
+
+func TestEndpointSliceTranslatorZoneAware(t *testing.T) {
+	zonedEndpoint := func(address, zone string, hinted bool) discovery_v1.Endpoint {
+		endpoint := discovery_v1.Endpoint{
+			Addresses:  []string{address},
+			Conditions: discovery_v1.EndpointConditions{Ready: ptr.To(true)},
+			Zone:       ptr.To(zone),
+		}
+		if hinted {
+			endpoint.Hints = &discovery_v1.EndpointHints{ForZones: []discovery_v1.ForZone{{Name: zone}}}
+		}
+		return endpoint
+	}
+	ports := []discovery_v1.EndpointPort{{
+		Port:     ptr.To[int32](8080),
+		Protocol: ptr.To(core_v1.ProtocolTCP),
+	}}
+	locality := func(zone string, addresses ...string) *envoy_config_endpoint_v3.LocalityLbEndpoints {
+		var lb []*envoy_config_endpoint_v3.LbEndpoint
+		for _, address := range addresses {
+			lb = append(lb, envoy_v3.LBEndpoint(envoy_v3.SocketAddress(address, 8080)))
+		}
+		return &envoy_config_endpoint_v3.LocalityLbEndpoints{
+			Locality:            &envoy_config_core_v3.Locality{Zone: zone},
+			LbEndpoints:         lb,
+			LoadBalancingWeight: wrapperspb.UInt32(1),
+		}
+	}
+	cluster := func(name string, services ...string) *dag.ServiceCluster {
+		c := &dag.ServiceCluster{ClusterName: name}
+		for _, service := range services {
+			c.Services = append(c.Services, dag.WeightedService{Weight: 1, ServiceName: service, ServiceNamespace: "default"})
+		}
+		return c
+	}
+
+	tests := map[string]struct {
+		cluster       *dag.ServiceCluster
+		endpointSlice *discovery_v1.EndpointSlice
+		want          []*envoy_config_endpoint_v3.LocalityLbEndpoints
+	}{
+		"hinted": {
+			cluster: cluster("default/app", "app"),
+			endpointSlice: endpointSlice("default", "app-1", "app", discovery_v1.AddressTypeIPv4, []discovery_v1.Endpoint{
+				zonedEndpoint("10.0.0.1", "zone-b", true),
+				zonedEndpoint("10.0.0.2", "zone-a", true),
+				zonedEndpoint("10.0.0.3", "zone-b", true),
+			}, ports),
+			want: []*envoy_config_endpoint_v3.LocalityLbEndpoints{
+				locality("zone-a", "10.0.0.2"),
+				locality("zone-b", "10.0.0.1", "10.0.0.3"),
+			},
+		},
+		"not hinted": {
+			cluster: cluster("default/app", "app"),
+			endpointSlice: endpointSlice("default", "app-1", "app", discovery_v1.AddressTypeIPv4, []discovery_v1.Endpoint{
+				zonedEndpoint("10.0.0.1", "zone-b", false),
+				zonedEndpoint("10.0.0.2", "zone-a", false),
+			}, ports),
+			want: envoy_v3.WeightedEndpoints(1,
+				envoy_v3.SocketAddress("10.0.0.1", 8080),
+				envoy_v3.SocketAddress("10.0.0.2", 8080),
+			),
+		},
+		"endpoint without zone": {
+			cluster: cluster("default/app", "app"),
+			endpointSlice: endpointSlice("default", "app-1", "app", discovery_v1.AddressTypeIPv4, []discovery_v1.Endpoint{
+				zonedEndpoint("10.0.0.1", "zone-b", true),
+				zonedEndpoint("10.0.0.2", "", false),
+			}, ports),
+			want: envoy_v3.WeightedEndpoints(1,
+				envoy_v3.SocketAddress("10.0.0.1", 8080),
+				envoy_v3.SocketAddress("10.0.0.2", 8080),
+			),
+		},
+		"multiple services": {
+			cluster: cluster("default/app", "app", "other"),
+			endpointSlice: endpointSlice("default", "app-1", "app", discovery_v1.AddressTypeIPv4, []discovery_v1.Endpoint{
+				zonedEndpoint("10.0.0.1", "zone-b", true),
+				zonedEndpoint("10.0.0.2", "zone-a", true),
+			}, ports),
+			want: envoy_v3.WeightedEndpoints(1,
+				envoy_v3.SocketAddress("10.0.0.1", 8080),
+				envoy_v3.SocketAddress("10.0.0.2", 8080),
+			),
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			endpointSliceTranslator := NewEndpointSliceTranslator(fixture.NewTestLogger(t))
+			require.NoError(t, endpointSliceTranslator.cache.SetClusters([]*dag.ServiceCluster{tc.cluster}))
+			endpointSliceTranslator.OnAdd(tc.endpointSlice, false)
+
+			protobuf.ExpectEqual(t, []proto.Message{
+				&envoy_config_endpoint_v3.ClusterLoadAssignment{
+					ClusterName: tc.cluster.ClusterName,
+					Endpoints:   tc.want,
+				},
+			}, endpointSliceTranslator.Contents())
+		})
+	}
+}
+
+func TestEndpointSliceTranslatorEnvoyService(t *testing.T) {
+	endpointSliceTranslator := NewEndpointSliceTranslator(fixture.NewTestLogger(t))
+	endpointSliceTranslator.SetEnvoyService(types.NamespacedName{Namespace: "projectcontour", Name: "envoy"})
+
+	// The Envoys are served before their endpoints are known.
+	want := &envoy_config_endpoint_v3.ClusterLoadAssignment{ClusterName: envoy.LocalClusterName}
+	protobuf.ExpectEqual(t, []proto.Message{want}, endpointSliceTranslator.Contents())
+
+	// Envoy Services have no zone hints, but the Envoys are always
+	// grouped by zone, on all ports.
+	endpointSliceTranslator.OnAdd(endpointSlice("projectcontour", "envoy-1", "envoy", discovery_v1.AddressTypeIPv4, []discovery_v1.Endpoint{
+		{Addresses: []string{"10.0.0.1"}, Zone: ptr.To("zone-a")},
+		{Addresses: []string{"10.0.0.2"}, Zone: ptr.To("zone-b")},
+	}, []discovery_v1.EndpointPort{
+		{Name: ptr.To("http"), Port: ptr.To[int32](8080), Protocol: ptr.To(core_v1.ProtocolTCP)},
+		{Name: ptr.To("https"), Port: ptr.To[int32](8443), Protocol: ptr.To(core_v1.ProtocolTCP)},
+	}), false)
+
+	want.Endpoints = []*envoy_config_endpoint_v3.LocalityLbEndpoints{{
+		Locality: &envoy_config_core_v3.Locality{Zone: "zone-a"},
+		LbEndpoints: []*envoy_config_endpoint_v3.LbEndpoint{
+			envoy_v3.LBEndpoint(envoy_v3.SocketAddress("10.0.0.1", 8080)),
+			envoy_v3.LBEndpoint(envoy_v3.SocketAddress("10.0.0.1", 8443)),
+		},
+		LoadBalancingWeight: wrapperspb.UInt32(1),
+	}, {
+		Locality: &envoy_config_core_v3.Locality{Zone: "zone-b"},
+		LbEndpoints: []*envoy_config_endpoint_v3.LbEndpoint{
+			envoy_v3.LBEndpoint(envoy_v3.SocketAddress("10.0.0.2", 8080)),
+			envoy_v3.LBEndpoint(envoy_v3.SocketAddress("10.0.0.2", 8443)),
+		},
+		LoadBalancingWeight: wrapperspb.UInt32(1),
+	}}
+	protobuf.ExpectEqual(t, []proto.Message{want}, endpointSliceTranslator.Contents())
+
+	// DAG rebuilds keep the Envoys.
+	endpointSliceTranslator.OnChange(&dag.DAG{})
+	protobuf.ExpectEqual(t, []proto.Message{want}, endpointSliceTranslator.Contents())
 }

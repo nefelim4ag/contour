@@ -37,6 +37,10 @@ const SDSTLSCertificateFile = "xds-tls-certificate.json"
 // CA certificates for Envoy to use for the XDS gRPC connection.
 const SDSValidationContextFile = "xds-validation-context.json"
 
+// LocalClusterName is the name of the cluster of the Envoys themselves, which
+// Envoy uses for zone aware routing. Contour serves its endpoints by EDS.
+const LocalClusterName = "envoy-local"
+
 // BootstrapConfig holds configuration values for a Bootstrap configuration.
 type BootstrapConfig struct {
 	// AdminAccessLogPath is the path to write the access log for the administration server.

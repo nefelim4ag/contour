@@ -231,6 +231,14 @@ func (e *EnvoyGen) bootstrapConfig(c *envoy.BootstrapConfig) *envoy_config_boots
 					}},
 				},
 			}, {
+				// The Envoys, for zone aware routing.
+				Name:                 envoy.LocalClusterName,
+				ClusterDiscoveryType: ClusterDiscoveryType(envoy_config_cluster_v3.Cluster_EDS),
+				EdsClusterConfig: &envoy_config_cluster_v3.Cluster_EdsClusterConfig{
+					EdsConfig:   e.GetConfigSource(),
+					ServiceName: envoy.LocalClusterName,
+				},
+			}, {
 				Name:                 "envoy-admin",
 				AltStatName:          strings.Join([]string{c.Namespace, "envoy-admin", strconv.Itoa(c.GetAdminPort())}, "_"),
 				ConnectTimeout:       durationpb.New(250 * time.Millisecond),
@@ -243,6 +251,9 @@ func (e *EnvoyGen) bootstrapConfig(c *envoy.BootstrapConfig) *envoy_config_boots
 					),
 				},
 			}},
+		},
+		ClusterManager: &envoy_config_bootstrap_v3.ClusterManager{
+			LocalClusterName: envoy.LocalClusterName,
 		},
 		DefaultRegexEngine: &envoy_config_core_v3.TypedExtensionConfig{
 			Name:        "envoy.regex_engines.google_re2",
