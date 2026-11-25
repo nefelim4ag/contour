@@ -4039,3 +4039,48 @@ func buildDAGGlobalExtAuth(t *testing.T, fallbackCertificate *types.NamespacedNa
 
 	return builder.Build()
 }
+
+// TestRouteVisit_HTTP3AltSvc checks that HTTP/3 is advertised on the route
+// configurations of virtual hosts served over HTTP/3, and only on those.
+func TestRouteVisit_HTTP3AltSvc(t *testing.T) {
+	proxy := func(fqdn string, tls *contour_v1.TLS) *contour_v1.HTTPProxy {
+		return &contour_v1.HTTPProxy{
+			ObjectMeta: meta_v1.ObjectMeta{Name: fqdn, Namespace: "default"},
+			Spec: contour_v1.HTTPProxySpec{
+				VirtualHost: &contour_v1.VirtualHost{Fqdn: fqdn, TLS: tls},
+				Routes: []contour_v1.Route{{
+					Services: []contour_v1.Service{{Name: "backend", Port: 80}},
+				}},
+			},
+		}
+	}
+	objs := []any{
+		proxy("www.example.com", &contour_v1.TLS{SecretName: "secret"}),
+		proxy("legacy.example.com", &contour_v1.TLS{SecretName: "secret", MaximumProtocolVersion: "1.2"}),
+		proxy("plain.example.com", nil),
+		&core_v1.Secret{
+			ObjectMeta: meta_v1.ObjectMeta{Name: "secret", Namespace: "default"},
+			Type:       "kubernetes.io/tls",
+			Data:       secretdata(CERTIFICATE, RSA_PRIVATE_KEY),
+		},
+		&core_v1.Service{
+			ObjectMeta: meta_v1.ObjectMeta{Name: "backend", Namespace: "default"},
+			Spec: core_v1.ServiceSpec{
+				Ports: []core_v1.ServicePort{{Name: "http", Protocol: "TCP", Port: 80}},
+			},
+		},
+	}
+
+	rc := RouteCache{HTTP3: true}
+	rc.OnChange(buildDAG(t, objs...))
+
+	protobuf.ExpectEqual(t,
+		[]*envoy_config_core_v3.HeaderValueOption{envoy_v3.AltSvcHTTP3(443)},
+		rc.values["https/www.example.com"].ResponseHeadersToAdd)
+	assert.Empty(t, rc.values["https/legacy.example.com"].ResponseHeadersToAdd)
+	assert.Empty(t, rc.values[ENVOY_HTTP_LISTENER].ResponseHeadersToAdd)
+
+	rc = RouteCache{}
+	rc.OnChange(buildDAG(t, objs...))
+	assert.Empty(t, rc.values["https/www.example.com"].ResponseHeadersToAdd)
+}

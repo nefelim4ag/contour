@@ -129,7 +129,7 @@ type HTTPVersionType string
 
 func (h HTTPVersionType) Validate() error {
 	switch h {
-	case HTTPVersion1, HTTPVersion2:
+	case HTTPVersion1, HTTPVersion2, HTTPVersion3:
 		return nil
 	default:
 		return fmt.Errorf("invalid HTTP version %q", h)
@@ -139,6 +139,7 @@ func (h HTTPVersionType) Validate() error {
 const (
 	HTTPVersion1 HTTPVersionType = "http/1.1"
 	HTTPVersion2 HTTPVersionType = "http/2"
+	HTTPVersion3 HTTPVersionType = "http/3"
 )
 
 // NamespacedName defines the namespace/name of the Kubernetes resource referred from the configuration file.

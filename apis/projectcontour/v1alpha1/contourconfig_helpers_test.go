@@ -131,6 +131,20 @@ func TestContourConfigurationSpecValidate(t *testing.T) {
 
 		c = contour_v1alpha1.ContourConfigurationSpec{
 			Envoy: &contour_v1alpha1.EnvoyConfig{
+				DefaultHTTPVersions: []contour_v1alpha1.HTTPVersionType{contour_v1alpha1.HTTPVersion3, contour_v1alpha1.HTTPVersion2},
+				Listener: &contour_v1alpha1.EnvoyListenerConfig{
+					TLS: &contour_v1alpha1.EnvoyListenerTLS{EnvoyTLS: contour_v1alpha1.EnvoyTLS{MaximumProtocolVersion: "1.3"}},
+				},
+			},
+		}
+		require.NoError(t, c.Validate())
+
+		// HTTP/3 requires TLS 1.3.
+		c.Envoy.Listener.TLS.MaximumProtocolVersion = "1.2"
+		require.Error(t, c.Validate())
+
+		c = contour_v1alpha1.ContourConfigurationSpec{
+			Envoy: &contour_v1alpha1.EnvoyConfig{
 				Cluster: &contour_v1alpha1.ClusterParameters{},
 			},
 		}

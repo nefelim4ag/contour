@@ -36,6 +36,7 @@ import (
 	envoy_filter_http_router_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3"
 	envoy_filter_network_http_connection_manager_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	envoy_filter_network_tcp_proxy_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
+	envoy_transport_socket_quic_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/quic/v3"
 	envoy_transport_socket_tls_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
 	"github.com/stretchr/testify/assert"
@@ -1771,6 +1772,77 @@ func TestFilterChainTLS_Match(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			got := FilterChainTLS(tc.domain, tc.downstream, tc.filters)
 			protobuf.ExpectEqual(t, tc.want, got)
+		})
+	}
+}
+
+func TestQUICListener(t *testing.T) {
+	want := &envoy_config_listener_v3.Listener{
+		Name: "ingress_https-quic",
+		Address: &envoy_config_core_v3.Address{
+			Address: &envoy_config_core_v3.Address_SocketAddress{
+				SocketAddress: &envoy_config_core_v3.SocketAddress{
+					Protocol: envoy_config_core_v3.SocketAddress_UDP,
+					Address:  "0.0.0.0",
+					PortSpecifier: &envoy_config_core_v3.SocketAddress_PortValue{
+						PortValue: 8443,
+					},
+				},
+			},
+		},
+		UdpListenerConfig: &envoy_config_listener_v3.UdpListenerConfig{
+			QuicOptions: &envoy_config_listener_v3.QuicProtocolOptions{},
+			DownstreamSocketConfig: &envoy_config_core_v3.UdpSocketConfig{
+				PreferGro: wrapperspb.Bool(true),
+			},
+		},
+	}
+
+	protobuf.ExpectEqual(t, want, QUICListener("ingress_https-quic", "0.0.0.0", 8443))
+}
+
+func TestFilterChainQUIC(t *testing.T) {
+	downstream := &envoy_transport_socket_tls_v3.DownstreamTlsContext{
+		CommonTlsContext: &envoy_transport_socket_tls_v3.CommonTlsContext{
+			AlpnProtocols: []string{"h3"},
+		},
+	}
+	transportSocket := &envoy_config_core_v3.TransportSocket{
+		Name: "envoy.transport_sockets.quic",
+		ConfigType: &envoy_config_core_v3.TransportSocket_TypedConfig{
+			TypedConfig: protobuf.MustMarshalAny(&envoy_transport_socket_quic_v3.QuicDownstreamTransport{
+				DownstreamTlsContext: downstream,
+			}),
+		},
+	}
+
+	tests := map[string]struct {
+		domain string
+		want   *envoy_config_listener_v3.FilterChain
+	}{
+		"SNI": {
+			domain: "projectcontour.io",
+			want: &envoy_config_listener_v3.FilterChain{
+				FilterChainMatch: &envoy_config_listener_v3.FilterChainMatch{
+					ServerNames: []string{"projectcontour.io"},
+				},
+				TransportSocket: transportSocket,
+			},
+		},
+		"No SNI": {
+			domain: "*",
+			want: &envoy_config_listener_v3.FilterChain{
+				FilterChainMatch: &envoy_config_listener_v3.FilterChainMatch{
+					TransportProtocol: "quic",
+				},
+				TransportSocket: transportSocket,
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			protobuf.ExpectEqual(t, tc.want, FilterChainQUIC(tc.domain, downstream, nil))
 		})
 	}
 }

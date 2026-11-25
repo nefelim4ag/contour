@@ -766,6 +766,17 @@ func headers(first *envoy_config_core_v3.HeaderValueOption, rest ...*envoy_confi
 	return append([]*envoy_config_core_v3.HeaderValueOption{first}, rest...)
 }
 
+// AltSvcHTTP3 returns a response header advertising HTTP/3 on the given port
+func AltSvcHTTP3(port int) *envoy_config_core_v3.HeaderValueOption {
+	return &envoy_config_core_v3.HeaderValueOption{
+		Header: &envoy_config_core_v3.HeaderValue{
+			Key:   "alt-svc",
+			Value: fmt.Sprintf(`h3=":%d"; ma=86400`, port),
+		},
+		AppendAction: envoy_config_core_v3.HeaderValueOption_ADD_IF_ABSENT,
+	}
+}
+
 func appendHeader(key, value string) *envoy_config_core_v3.HeaderValueOption {
 	return &envoy_config_core_v3.HeaderValueOption{
 		Header: &envoy_config_core_v3.HeaderValue{

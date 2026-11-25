@@ -16,6 +16,7 @@ package v1alpha1
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -135,7 +136,7 @@ func (e *EnvoyConfig) Validate() error {
 	var invalidHTTPVersions []string
 	for _, v := range e.DefaultHTTPVersions {
 		switch v {
-		case HTTPVersion1, HTTPVersion2:
+		case HTTPVersion1, HTTPVersion2, HTTPVersion3:
 			continue
 		default:
 			invalidHTTPVersions = append(invalidHTTPVersions, string(v))
@@ -159,6 +160,9 @@ func (e *EnvoyConfig) Validate() error {
 		if e.Listener.TLS != nil {
 			if err := e.Listener.TLS.Validate(); err != nil {
 				return err
+			}
+			if slices.Contains(e.DefaultHTTPVersions, HTTPVersion3) && e.Listener.TLS.MaximumProtocolVersion == "1.2" {
+				return errors.New("invalid HTTP versions: HTTP/3 requires TLS 1.3, but the maximum TLS protocol version is 1.2")
 			}
 		}
 	}

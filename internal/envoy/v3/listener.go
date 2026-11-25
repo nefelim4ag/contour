@@ -42,6 +42,7 @@ import (
 	envoy_filter_listener_tls_inspector_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/listener/tls_inspector/v3"
 	envoy_filter_network_http_connection_manager_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	envoy_filter_network_tcp_proxy_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/tcp_proxy/v3"
+	envoy_transport_socket_quic_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/quic/v3"
 	envoy_transport_socket_tls_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	envoy_matcher_v3 "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
 	envoy_type_v3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
@@ -1160,6 +1161,53 @@ func FilterChainTLSFallback(downstream *envoy_transport_socket_tls_v3.Downstream
 	if downstream != nil {
 		fc.TransportSocket = DownstreamTLSTransportSocket(downstream)
 	}
+	return fc
+}
+
+// QUICListener returns a new UDP envoy_config_listener_v3.Listener that
+// terminates QUIC (HTTP/3) on the supplied address and port. Filter chains
+// are expected to be added with FilterChainQUIC.
+func QUICListener(name, address string, port int) *envoy_config_listener_v3.Listener {
+	addr := SocketAddress(address, port)
+	addr.GetSocketAddress().Protocol = envoy_config_core_v3.SocketAddress_UDP
+
+	return &envoy_config_listener_v3.Listener{
+		Name:    name,
+		Address: addr,
+		UdpListenerConfig: &envoy_config_listener_v3.UdpListenerConfig{
+			QuicOptions: &envoy_config_listener_v3.QuicProtocolOptions{},
+			DownstreamSocketConfig: &envoy_config_core_v3.UdpSocketConfig{
+				PreferGro: wrapperspb.Bool(true),
+			},
+		},
+	}
+}
+
+// FilterChainQUIC returns a QUIC enabled envoy_config_listener_v3.FilterChain.
+func FilterChainQUIC(domain string, downstream *envoy_transport_socket_tls_v3.DownstreamTlsContext, filters []*envoy_config_listener_v3.Filter) *envoy_config_listener_v3.FilterChain {
+	fc := &envoy_config_listener_v3.FilterChain{
+		Filters: filters,
+		TransportSocket: &envoy_config_core_v3.TransportSocket{
+			Name: "envoy.transport_sockets.quic",
+			ConfigType: &envoy_config_core_v3.TransportSocket_TypedConfig{
+				TypedConfig: protobuf.MustMarshalAny(&envoy_transport_socket_quic_v3.QuicDownstreamTransport{
+					DownstreamTlsContext: downstream,
+				}),
+			},
+		},
+	}
+
+	// See FilterChainTLS, QUIC connections report "quic" as transport protocol.
+	if domain == "*" {
+		fc.FilterChainMatch = &envoy_config_listener_v3.FilterChainMatch{
+			TransportProtocol: "quic",
+		}
+	} else {
+		fc.FilterChainMatch = &envoy_config_listener_v3.FilterChainMatch{
+			ServerNames: []string{domain},
+		}
+	}
+
 	return fc
 }
 

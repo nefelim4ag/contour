@@ -32,6 +32,9 @@ import (
 type RouteCache struct {
 	mu     sync.Mutex
 	values map[string]*envoy_config_route_v3.RouteConfiguration
+
+	// HTTP3 advertises HTTP/3
+	HTTP3 bool
 }
 
 // Update replaces the contents of the cache with the supplied map.
@@ -106,6 +109,12 @@ func (c *RouteCache) OnChange(root *dag.DAG) {
 
 				if _, ok := routeConfigs[routeConfigName]; !ok {
 					routeConfigs[routeConfigName] = envoy_v3.RouteConfiguration(routeConfigName)
+
+					if c.HTTP3 && http3Suitable(vhost) {
+						routeConfigs[routeConfigName].ResponseHeadersToAdd = append(
+							routeConfigs[routeConfigName].ResponseHeadersToAdd,
+							envoy_v3.AltSvcHTTP3(443))
+					}
 				}
 
 				var routes []*dag.Route

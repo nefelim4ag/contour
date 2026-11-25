@@ -225,6 +225,10 @@ const (
 
 	// HTTPVersion2 is the name of the HTTP/2 version.
 	HTTPVersion2 HTTPVersionType = "HTTP/2"
+
+	// HTTPVersion3 is the name of the HTTP/3 version.
+	// HTTP/3 (QUIC/UDP) listens on the same port number as HTTPS.
+	HTTPVersion3 HTTPVersionType = "HTTP/3"
 )
 
 // EnvoyConfig defines how Envoy is to be Configured from Contour.

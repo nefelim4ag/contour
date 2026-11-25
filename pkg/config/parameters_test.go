@@ -203,6 +203,7 @@ func TestValidateHTTPVersionType(t *testing.T) {
 
 	require.NoError(t, HTTPVersion1.Validate())
 	require.NoError(t, HTTPVersion2.Validate())
+	require.NoError(t, HTTPVersion3.Validate())
 }
 
 func TestValidateTimeoutParams(t *testing.T) {

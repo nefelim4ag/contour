@@ -3684,3 +3684,97 @@ func TestListenerForwardProtoConfig(t *testing.T) {
 		assert.Nil(t, hcm.ForwardProtoConfig)
 	}
 }
+
+func TestSplitHTTP3(t *testing.T) {
+	versions, http3 := splitHTTP3([]envoy_v3.HTTPVersionType{envoy_v3.HTTPVersion3, envoy_v3.HTTPVersion1})
+	assert.Equal(t, []envoy_v3.HTTPVersionType{envoy_v3.HTTPVersion1}, versions)
+	assert.True(t, http3)
+
+	// HTTP/3 alone keeps the default versions on TCP listeners.
+	versions, http3 = splitHTTP3([]envoy_v3.HTTPVersionType{envoy_v3.HTTPVersion3})
+	assert.Nil(t, versions)
+	assert.True(t, http3)
+
+	versions, http3 = splitHTTP3(nil)
+	assert.Nil(t, versions)
+	assert.False(t, http3)
+}
+
+// TestListenerVisit_HTTP3 checks that, when enabled, a UDP listener serving
+// HTTP/3 is added next to the HTTPS listener for virtual hosts that can use
+// TLS 1.3, and that other virtual hosts are left out.
+func TestListenerVisit_HTTP3(t *testing.T) {
+	envoyGen := envoy_v3.NewEnvoyGen(envoy_v3.EnvoyGenOpt{
+		XDSClusterName: envoy_v3.DefaultXDSClusterName,
+	})
+
+	proxy := func(fqdn, maxTLS string) *contour_v1.HTTPProxy {
+		return &contour_v1.HTTPProxy{
+			ObjectMeta: meta_v1.ObjectMeta{Name: fqdn, Namespace: "default"},
+			Spec: contour_v1.HTTPProxySpec{
+				VirtualHost: &contour_v1.VirtualHost{
+					Fqdn: fqdn,
+					TLS: &contour_v1.TLS{
+						SecretName:             "secret",
+						MaximumProtocolVersion: maxTLS,
+					},
+				},
+				Routes: []contour_v1.Route{{
+					Services: []contour_v1.Service{{Name: "backend", Port: 80}},
+				}},
+			},
+		}
+	}
+	secret := &core_v1.Secret{
+		ObjectMeta: meta_v1.ObjectMeta{Name: "secret", Namespace: "default"},
+		Type:       "kubernetes.io/tls",
+		Data:       secretdata(CERTIFICATE, RSA_PRIVATE_KEY),
+	}
+	service := &core_v1.Service{
+		ObjectMeta: meta_v1.ObjectMeta{Name: "backend", Namespace: "default"},
+		Spec: core_v1.ServiceSpec{
+			Ports: []core_v1.ServicePort{{Name: "http", Protocol: "TCP", Port: 80}},
+		},
+	}
+	dagSecret := &dag.Secret{Object: secret}
+
+	lc := ListenerCache{
+		Config: ListenerConfig{DefaultHTTPVersions: []envoy_v3.HTTPVersionType{
+			envoy_v3.HTTPVersion3, envoy_v3.HTTPVersion2, envoy_v3.HTTPVersion1,
+		}},
+		envoyGen: envoyGen,
+	}
+	lc.OnChange(buildDAGFallback(t, nil, proxy("www.example.com", ""), proxy("legacy.example.com", "1.2"), secret, service))
+
+	quic := lc.values[ENVOY_HTTPS_LISTENER+"-quic"]
+	require.NotNil(t, quic)
+
+	want := envoy_v3.QUICListener(ENVOY_HTTPS_LISTENER+"-quic", "0.0.0.0", 8443)
+	want.FilterChains = []*envoy_config_listener_v3.FilterChain{
+		envoy_v3.FilterChainQUIC("www.example.com",
+			envoyGen.DownstreamTLSContext(dagSecret,
+				envoy_transport_socket_tls_v3.TlsParameters_TLSv1_3,
+				envoy_transport_socket_tls_v3.TlsParameters_TLSv1_3,
+				nil, nil, nil, "h3"),
+			envoy_v3.Filters(envoyGen.HTTPConnectionManagerBuilder().
+				Codec(envoy_v3.HTTPVersion3).
+				AddFilter(envoy_v3.FilterMisdirectedRequests()).
+				DefaultFilters().
+				MetricsPrefix(ENVOY_HTTPS_LISTENER).
+				RouteConfigName(path.Join("https", "www.example.com")).
+				AccessLoggers(envoy_v3.FileAccessLogEnvoy(DEFAULT_HTTP_ACCESS_LOG, "", nil, contour_v1alpha1.LogLevelInfo)).
+				Get())),
+	}
+	protobuf.ExpectEqual(t, want, quic)
+
+	// The TCP listener still serves both virtual hosts, without HTTP/3.
+	require.Len(t, lc.values[ENVOY_HTTPS_LISTENER].FilterChains, 2)
+	protobuf.ExpectEqual(t,
+		transportSocket(envoyGen, "secret", envoy_transport_socket_tls_v3.TlsParameters_TLSv1_2, envoy_transport_socket_tls_v3.TlsParameters_TLSv1_3, nil, "h2", "http/1.1"),
+		lc.values[ENVOY_HTTPS_LISTENER].FilterChains[1].TransportSocket)
+
+	// Without HTTP/3 configured, there is no UDP listener.
+	lc.Config.DefaultHTTPVersions = []envoy_v3.HTTPVersionType{envoy_v3.HTTPVersion2, envoy_v3.HTTPVersion1}
+	lc.OnChange(buildDAGFallback(t, nil, proxy("www.example.com", ""), secret, service))
+	require.NotContains(t, lc.values, ENVOY_HTTPS_LISTENER+"-quic")
+}

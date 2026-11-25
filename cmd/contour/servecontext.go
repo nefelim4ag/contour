@@ -275,6 +275,8 @@ func parseDefaultHTTPVersions(versions []contour_v1alpha1.HTTPVersionType) []env
 			wanted[envoy_v3.HTTPVersion1] = struct{}{}
 		case contour_v1alpha1.HTTPVersion2:
 			wanted[envoy_v3.HTTPVersion2] = struct{}{}
+		case contour_v1alpha1.HTTPVersion3:
+			wanted[envoy_v3.HTTPVersion3] = struct{}{}
 		}
 	}
 
@@ -350,6 +352,8 @@ func (ctx *serveContext) convertToContourConfigurationSpec() contour_v1alpha1.Co
 			defaultHTTPVersions = append(defaultHTTPVersions, contour_v1alpha1.HTTPVersion1)
 		case config.HTTPVersion2:
 			defaultHTTPVersions = append(defaultHTTPVersions, contour_v1alpha1.HTTPVersion2)
+		case config.HTTPVersion3:
+			defaultHTTPVersions = append(defaultHTTPVersions, contour_v1alpha1.HTTPVersion3)
 		}
 	}
 

@@ -339,6 +339,10 @@ func TestParseHTTPVersions(t *testing.T) {
 			versions:      []contour_v1alpha1.HTTPVersionType{contour_v1alpha1.HTTPVersion1, contour_v1alpha1.HTTPVersion2},
 			parseVersions: []envoy_v3.HTTPVersionType{envoy_v3.HTTPVersion1, envoy_v3.HTTPVersion2},
 		},
+		"http/1.1+http/2+http/3": {
+			versions:      []contour_v1alpha1.HTTPVersionType{contour_v1alpha1.HTTPVersion1, contour_v1alpha1.HTTPVersion2, contour_v1alpha1.HTTPVersion3},
+			parseVersions: []envoy_v3.HTTPVersionType{envoy_v3.HTTPVersion1, envoy_v3.HTTPVersion2, envoy_v3.HTTPVersion3},
+		},
 		"http/1.1+http/2 duplicated": {
 			versions: []contour_v1alpha1.HTTPVersionType{
 				contour_v1alpha1.HTTPVersion1, contour_v1alpha1.HTTPVersion2,

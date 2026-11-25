@@ -14,6 +14,7 @@
 package v3
 
 import (
+	"slices"
 	"sort"
 	"sync"
 
@@ -179,6 +180,37 @@ type ListenerConfig struct {
 	// the PROXY protocol header, for example to derive X-Forwarded-Proto from
 	// the destination port.
 	ProxyProtocolSettings *contour_v1alpha1.ProxyProtocolSettings
+}
+
+// quicListenerName returns the name of the UDP listener serving HTTP/3
+// next to the TCP listener with the given name.
+func quicListenerName(name string) string {
+	return name + "-quic"
+}
+
+// splitHTTP3 splits HTTP/3 from the given HTTP versions, which TCP listeners
+// serve. Normal TCP listener accepts the rest.
+func splitHTTP3(versions []envoy_v3.HTTPVersionType) ([]envoy_v3.HTTPVersionType, bool) {
+	tcpVersions := slices.DeleteFunc(slices.Clone(versions), func(v envoy_v3.HTTPVersionType) bool {
+		return v == envoy_v3.HTTPVersion3
+	})
+	if len(tcpVersions) == 0 {
+		// Use the default versions.
+		tcpVersions = nil
+	}
+	return tcpVersions, len(tcpVersions) != len(versions)
+}
+
+// http3Suitable reports if the virtual host can be served over HTTP/3,
+// i.e host uses TLS and TLS 1.3 is allowed.
+func http3Suitable(vh *dag.SecureVirtualHost) bool {
+	if vh.TCPProxy != nil || vh.Secret == nil {
+		return false
+	}
+
+	maxVer := envoy_v3.ParseTLSVersion(vh.MaxTLSVersion)
+	return maxVer == envoy_transport_socket_tls_v3.TlsParameters_TLS_AUTO ||
+		maxVer >= envoy_transport_socket_tls_v3.TlsParameters_TLSv1_3
 }
 
 type ExtensionServiceConfig struct {
@@ -374,6 +406,10 @@ func (*ListenerCache) TypeURL() string { return resource.ListenerType }
 func (c *ListenerCache) OnChange(root *dag.DAG) {
 	cfg := c.Config
 	listeners := map[string]*envoy_config_listener_v3.Listener{}
+	quicListeners := map[string]*envoy_config_listener_v3.Listener{}
+
+	// HTTP/3 is served by separate UDP listeners.
+	httpVersions, http3 := splitHTTP3(cfg.DefaultHTTPVersions)
 
 	socketOptions := envoy_v3.NewSocketOptions().TCPKeepalive()
 	if cfg.SocketOptions != nil {
@@ -403,7 +439,7 @@ func (c *ListenerCache) OnChange(root *dag.DAG) {
 		if len(listener.VirtualHosts) > 0 {
 			cm := c.envoyGen.HTTPConnectionManagerBuilder().
 				Compression(cfg.Compression).
-				Codec(envoy_v3.CodecForVersions(cfg.DefaultHTTPVersions...)).
+				Codec(envoy_v3.CodecForVersions(httpVersions...)).
 				DefaultFilters().
 				AddBodySizeLimitFilter(cfg.MaxRequestBodyBytes).
 				RouteConfigName(httpRouteConfigName(listener)).
@@ -457,6 +493,7 @@ func (c *ListenerCache) OnChange(root *dag.DAG) {
 		for _, vh := range listener.SecureVirtualHosts {
 			var alpnProtos []string
 			var filters []*envoy_config_listener_v3.Filter
+			var quicFilters []*envoy_config_listener_v3.Filter
 
 			var forwardClientCertificate *dag.ClientCertificateDetails
 			if vh.DownstreamValidation != nil {
@@ -477,9 +514,9 @@ func (c *ListenerCache) OnChange(root *dag.DAG) {
 				// metrics prefix to keep compatibility with previous
 				// Contour versions since the metrics prefix will be
 				// coded into monitoring dashboards.
-				cm := c.envoyGen.HTTPConnectionManagerBuilder().
+				cmb := c.envoyGen.HTTPConnectionManagerBuilder().
 					Compression(cfg.Compression).
-					Codec(envoy_v3.CodecForVersions(cfg.DefaultHTTPVersions...)).
+					Codec(envoy_v3.CodecForVersions(httpVersions...)).
 					AddFilter(envoy_v3.FilterMisdirectedRequests()).
 					DefaultFilters().
 					AddBodySizeLimitFilter(cfg.MaxRequestBodyBytes).
@@ -505,12 +542,16 @@ func (c *ListenerCache) OnChange(root *dag.DAG) {
 					ForwardClientCertificate(forwardClientCertificate).
 					MaxRequestsPerConnection(cfg.MaxRequestsPerConnection).
 					HTTP2MaxConcurrentStreams(cfg.HTTP2MaxConcurrentStreams).
-					EnableWebsockets(listener.EnableWebsockets).
-					Get()
+					EnableWebsockets(listener.EnableWebsockets)
 
-				filters = envoy_v3.Filters(cm)
+				filters = envoy_v3.Filters(cmb.Get())
 
-				alpnProtos = envoy_v3.ProtoNamesForVersions(cfg.DefaultHTTPVersions...)
+				alpnProtos = envoy_v3.ProtoNamesForVersions(httpVersions...)
+
+				// The HTTP/3 connection manager only differs by codec.
+				if http3 && http3Suitable(vh) {
+					quicFilters = envoy_v3.Filters(cmb.Codec(envoy_v3.HTTPVersion3).Get())
+				}
 			} else {
 				filters = envoy_v3.Filters(envoy_v3.TCPProxy(listener.Name, vh.TCPProxy, cfg.newSecureAccessLog()))
 
@@ -543,6 +584,25 @@ func (c *ListenerCache) OnChange(root *dag.DAG) {
 			}
 
 			listeners[listener.Name].FilterChains = append(listeners[listener.Name].FilterChains, envoy_v3.FilterChainTLS(vh.Name, downstreamTLS, filters))
+
+			// Serve the same virtual host over HTTP/3 on a UDP listener
+			// UDP listener uses the same port number as TCP
+			if len(quicFilters) > 0 {
+				quicTLS := c.envoyGen.DownstreamTLSContext(
+					vh.Secret,
+					envoy_transport_socket_tls_v3.TlsParameters_TLSv1_3,
+					envoy_transport_socket_tls_v3.TlsParameters_TLSv1_3,
+					nil,
+					cfg.ECDHCurves,
+					vh.DownstreamValidation,
+					"h3")
+
+				name := quicListenerName(listener.Name)
+				if quicListeners[name] == nil {
+					quicListeners[name] = envoy_v3.QUICListener(name, listener.Address, listener.Port)
+				}
+				quicListeners[name].FilterChains = append(quicListeners[name].FilterChains, envoy_v3.FilterChainQUIC(vh.Name, quicTLS, quicFilters))
+			}
 
 			// If this VirtualHost has enabled the fallback certificate then set a default
 			// FilterChain which will allow routes with this vhost to accept non-SNI TLS requests.
@@ -630,6 +690,12 @@ func (c *ListenerCache) OnChange(root *dag.DAG) {
 		for _, listener := range listeners {
 			listener.MaxConnectionsToAcceptPerSocketEvent = wrapperspb.UInt32(*cfg.MaxConnectionsToAcceptPerSocketEvent)
 		}
+	}
+
+	// HTTP/3 listeners are added last, because options above only applies to TCP listeners.
+	for name, listener := range quicListeners {
+		sort.Stable(sorter.For(listener.FilterChains))
+		listeners[name] = listener
 	}
 
 	c.Update(listeners)

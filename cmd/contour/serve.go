@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"time"
 
@@ -503,7 +504,7 @@ func (s *Server) doServe() error {
 	resources := []xdscache.ResourceCache{
 		xdscache_v3.NewListenerCache(listenerConfig, *contourConfiguration.Envoy.Metrics, *contourConfiguration.Envoy.Health, contourConfiguration.Envoy.OMEnforcedHealth, *contourConfiguration.Envoy.Network.EnvoyAdminPort, envoyGen),
 		xdscache_v3.NewSecretsCache(envoy_v3.StatsSecrets(contourConfiguration.Envoy.Metrics.TLS)),
-		&xdscache_v3.RouteCache{},
+		&xdscache_v3.RouteCache{HTTP3: slices.Contains(listenerConfig.DefaultHTTPVersions, envoy_v3.HTTPVersion3)},
 		xdscache_v3.NewClusterCache(envoyGen),
 		endpointHandler,
 		xdscache_v3.NewRuntimeCache(s.log.WithField("context", "runtimeCache"), xdscache_v3.ConfigurableRuntimeSettings{
