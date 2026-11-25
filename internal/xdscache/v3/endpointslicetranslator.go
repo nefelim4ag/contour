@@ -19,6 +19,7 @@ import (
 	"sort"
 	"sync"
 
+	envoy_config_core_v3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_config_endpoint_v3 "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	resource "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/sirupsen/logrus"
@@ -55,10 +56,7 @@ func (c *EndpointSliceCache) RecalculateEndpoints(port, healthPort core_v1.Servi
 		})
 
 		for _, endpoint := range endpointSlice.Endpoints {
-			// Skip if the endpointSlice is not marked as ready.
-			if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
-				continue
-			}
+			healthStatus := endpointHealthStatus(endpoint.Conditions)
 
 			// Range over each port. We want the resultant endpoints to be a
 			// a cartesian product MxN where M are the endpoints and N are the ports.
@@ -104,7 +102,9 @@ func (c *EndpointSliceCache) RecalculateEndpoints(port, healthPort core_v1.Servi
 				// Hence, we need to ensure that the endpoints we add to []*LoadBalancingEndpoint aren't duplicated.
 				endpointKey := fmt.Sprintf("%s:%d", endpoint.Addresses[0], *endpointPort.Port)
 				if _, exists := uniqueEndpoints[endpointKey]; !exists {
-					lb = append(lb, envoy_v3.LBEndpoint(addr))
+					lbEndpoint := envoy_v3.LBEndpoint(addr)
+					lbEndpoint.HealthStatus = healthStatus
+					lb = append(lb, lbEndpoint)
 					uniqueEndpoints[endpointKey] = struct{}{}
 				}
 			}
@@ -118,6 +118,20 @@ func (c *EndpointSliceCache) RecalculateEndpoints(port, healthPort core_v1.Servi
 	}
 
 	return lb
+}
+
+// endpointHealthStatus tells Envoy about endpoints that must not receive
+// traffic, instead of leaving them out. That way Envoy aware of their existence.
+// Which is used in the metrics and can be used in Zone Aware Load Balancing
+func endpointHealthStatus(conditions discovery_v1.EndpointConditions) envoy_config_core_v3.HealthStatus {
+	switch {
+	case conditions.Ready == nil || *conditions.Ready:
+		return envoy_config_core_v3.HealthStatus_UNKNOWN
+	case conditions.Terminating != nil && *conditions.Terminating:
+		return envoy_config_core_v3.HealthStatus_DRAINING
+	default:
+		return envoy_config_core_v3.HealthStatus_UNHEALTHY
+	}
 }
 
 // EndpointSliceCache is a cache of EndpointSlice and ServiceCluster objects.

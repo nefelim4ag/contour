@@ -352,15 +352,17 @@ func TestEndpointSliceTranslatorAddEndpoints(t *testing.T) {
 				&envoy_config_endpoint_v3.ClusterLoadAssignment{ClusterName: "default/healthcheck-port"},
 				&envoy_config_endpoint_v3.ClusterLoadAssignment{
 					ClusterName: "default/httpbin-org/a",
-					Endpoints: envoy_v3.WeightedEndpoints(1,
+					Endpoints: withHealthStatus(envoy_v3.WeightedEndpoints(1,
+						envoy_v3.SocketAddress("10.10.1.1", 8675),
 						envoy_v3.SocketAddress("10.10.2.2", 8675),
-					),
+					), envoy_config_core_v3.HealthStatus_UNHEALTHY, 0),
 				},
 				&envoy_config_endpoint_v3.ClusterLoadAssignment{
 					ClusterName: "default/httpbin-org/b",
-					Endpoints: envoy_v3.WeightedEndpoints(1,
+					Endpoints: withHealthStatus(envoy_v3.WeightedEndpoints(1,
+						envoy_v3.SocketAddress("10.10.1.1", 309),
 						envoy_v3.SocketAddress("10.10.2.2", 309),
-					),
+					), envoy_config_core_v3.HealthStatus_UNHEALTHY, 0),
 				},
 				&envoy_config_endpoint_v3.ClusterLoadAssignment{ClusterName: "default/simple"},
 			},
@@ -1284,5 +1286,43 @@ func healthCheckLBEndpoint(addr *envoy_config_core_v3.Address, healthCheckPort u
 				HealthCheckConfig: hc,
 			},
 		},
+	}
+}
+
+// withHealthStatus sets the health status of the endpoints at the given
+// indexes of the first locality.
+func withHealthStatus(endpoints []*envoy_config_endpoint_v3.LocalityLbEndpoints, status envoy_config_core_v3.HealthStatus, indexes ...int) []*envoy_config_endpoint_v3.LocalityLbEndpoints {
+	for _, i := range indexes {
+		endpoints[0].LbEndpoints[i].HealthStatus = status
+	}
+	return endpoints
+}
+
+func TestEndpointHealthStatus(t *testing.T) {
+	tests := map[string]struct {
+		conditions discovery_v1.EndpointConditions
+		want       envoy_config_core_v3.HealthStatus
+	}{
+		"no conditions": {
+			want: envoy_config_core_v3.HealthStatus_UNKNOWN,
+		},
+		"ready": {
+			conditions: discovery_v1.EndpointConditions{Ready: ptr.To(true)},
+			want:       envoy_config_core_v3.HealthStatus_UNKNOWN,
+		},
+		"not ready": {
+			conditions: discovery_v1.EndpointConditions{Ready: ptr.To(false)},
+			want:       envoy_config_core_v3.HealthStatus_UNHEALTHY,
+		},
+		"terminating": {
+			conditions: discovery_v1.EndpointConditions{Ready: ptr.To(false), Serving: ptr.To(true), Terminating: ptr.To(true)},
+			want:       envoy_config_core_v3.HealthStatus_DRAINING,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, endpointHealthStatus(tc.conditions))
+		})
 	}
 }

@@ -16,6 +16,7 @@ package v3
 import (
 	"testing"
 
+	envoy_config_core_v3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_config_endpoint_v3 "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	envoy_service_discovery_v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	core_v1 "k8s.io/api/core/v1"
@@ -176,9 +177,10 @@ func TestAddEndpointComplicated(t *testing.T) {
 			},
 			&envoy_config_endpoint_v3.ClusterLoadAssignment{
 				ClusterName: "default/kuard/foo",
-				Endpoints: envoy_v3.WeightedEndpoints(1,
+				Endpoints: unhealthy(envoy_v3.WeightedEndpoints(1,
+					envoy_v3.SocketAddress("10.48.1.77", 8080),
 					envoy_v3.SocketAddress("10.48.1.78", 8080),
-				),
+				), 0),
 			},
 		),
 	})
@@ -240,7 +242,10 @@ func TestEndpointFilter(t *testing.T) {
 		Resources: resources(t,
 			&envoy_config_endpoint_v3.ClusterLoadAssignment{
 				ClusterName: "default/kuard/foo",
-				Endpoints:   envoy_v3.WeightedEndpoints(1, envoy_v3.SocketAddress("10.48.1.78", 8080)),
+				Endpoints: unhealthy(envoy_v3.WeightedEndpoints(1,
+					envoy_v3.SocketAddress("10.48.1.77", 8080),
+					envoy_v3.SocketAddress("10.48.1.78", 8080),
+				), 0),
 			},
 		),
 	})
@@ -296,4 +301,13 @@ func TestIssue602(t *testing.T) {
 		Resources: resources(t, envoy_v3.ClusterLoadAssignment("default/simple")),
 		TypeUrl:   endpointType,
 	})
+}
+
+// unhealthy marks the endpoints at the given indexes of the first locality
+// as not ready.
+func unhealthy(endpoints []*envoy_config_endpoint_v3.LocalityLbEndpoints, indexes ...int) []*envoy_config_endpoint_v3.LocalityLbEndpoints {
+	for _, i := range indexes {
+		endpoints[0].LbEndpoints[i].HealthStatus = envoy_config_core_v3.HealthStatus_UNHEALTHY
+	}
+	return endpoints
 }
